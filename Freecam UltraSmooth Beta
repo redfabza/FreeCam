@@ -1,1 +1,883 @@
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local UIS = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local StarterGui = game:GetService("StarterGui")
+local camera = workspace.CurrentCamera
 
+local playerGui = player:WaitForChild("PlayerGui")
+
+local connections = {}
+local function track(conn)
+    table.insert(connections, conn)
+    return conn
+end
+
+----------------------------------------------------------------
+-- SETTINGS & VARIABLES (ULTRA SMOOTH CONFIG)
+----------------------------------------------------------------
+local cameraSpeed = 1.0       -- ความเร็วการเคลื่อนที่
+local cameraSmoothness = 0.25 -- ความนุ่มนวลเริ่มต้น
+local touchSensitivity = 0.2  -- ความไวสัมผัสหมุนมุมมอง
+local joystickOpacity = 0.0   -- ความทึบ UI เริ่มต้นที่ 0%
+
+local toggle = Instance.new("BoolValue")
+toggle.Name = "FreeMoveEnabled"
+toggle.Value = false
+toggle.Parent = player
+
+local showJoystick = Instance.new("BoolValue")
+showJoystick.Name = "ShowJoystick"
+showJoystick.Value = true
+showJoystick.Parent = player
+
+local showZoomButtons = Instance.new("BoolValue")
+showZoomButtons.Name = "ShowZoomButtons"
+showZoomButtons.Value = true
+showZoomButtons.Parent = player
+
+local showLeanButtons = Instance.new("BoolValue")
+showLeanButtons.Name = "ShowLeanButtons"
+showLeanButtons.Value = true
+showLeanButtons.Parent = player
+
+local isGameUICleared = false
+
+local origMinZoom = player.CameraMinZoomDistance
+local origMaxZoom = player.CameraMaxZoomDistance
+local origFOV = camera.FieldOfView
+
+-- ค่า CFrame และ Rotation แบบ Ultra Smooth
+local camCFrame = camera.CFrame
+local targetCFrame = camera.CFrame
+local yaw = 0
+local pitch = 0
+local roll = 0
+local targetRoll = 0
+local leanSpeed = 1.2
+
+-- สำหรับระบบ Inertia (ความหน่วงการหมุนให้สมูทขึ้น)
+local targetYaw = 0
+local targetPitch = 0
+
+-- ระบบ Zoom (FOV)
+local minFOV = 10
+local maxFOV = 100
+local targetFOV = origFOV
+
+-- ข้อมูล Joystick
+_G.JoystickData = {
+    DraggingLevel = 0,
+    Direction = Vector3.new(0, 0, 0)
+}
+
+----------------------------------------------------------------
+-- NOTIFICATION SYSTEM (BETA MESSAGE)
+----------------------------------------------------------------
+local function showNotification(message, duration)
+    pcall(function()
+        local notifGui = playerGui:FindFirstChild("FreeCamNotifGui")
+        if notifGui then notifGui:Destroy() end
+
+        notifGui = Instance.new("ScreenGui")
+        notifGui.Name = "FreeCamNotifGui"
+        notifGui.ResetOnSpawn = false
+        notifGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        notifGui.Parent = playerGui
+
+        local notifFrame = Instance.new("Frame")
+        notifFrame.Size = UDim2.fromOffset(260, 45)
+        notifFrame.Position = UDim2.new(0.5, -130, 0, 50)
+        notifFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+        notifFrame.BackgroundTransparency = 0.1
+        notifFrame.BorderSizePixel = 0
+        notifFrame.Parent = notifGui
+        Instance.new("UICorner", notifFrame).CornerRadius = UDim.new(0, 10)
+        
+        local stroke = Instance.new("UIStroke", notifFrame)
+        stroke.Color = Color3.fromRGB(0, 180, 255)
+        stroke.Thickness = 1.5
+
+        local notifText = Instance.new("TextLabel")
+        notifText.Size = UDim2.new(1, 0, 1, 0)
+        notifText.BackgroundTransparency = 1
+        notifText.Text = message
+        notifText.Font = Enum.Font.GothamBold
+        notifText.TextSize = 12
+        notifText.TextColor3 = Color3.fromRGB(255, 255, 255)
+        notifText.Parent = notifFrame
+
+        task.delay(duration or 3, function()
+            if notifGui and notifGui.Parent then
+                notifGui:Destroy()
+            end
+        end)
+    end)
+end
+
+----------------------------------------------------------------
+-- GAME UI HIDE / SHOW LOGIC
+----------------------------------------------------------------
+local hiddenGuis = {}
+
+local function setGameUICleared(state)
+    isGameUICleared = state
+    pcall(function()
+        StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, not state)
+    end)
+
+    if state then
+        hiddenGuis = {}
+        for _, gui in ipairs(playerGui:GetChildren()) do
+            if gui:IsA("ScreenGui") and gui.Name ~= "FreeCamGui" and gui.Name ~= "FreeCamNotifGui" and gui.Enabled then
+                table.insert(hiddenGuis, gui)
+                gui.Enabled = false
+            end
+        end
+    else
+        for _, gui in ipairs(hiddenGuis) do
+            if gui and gui.Parent then
+                gui.Enabled = true
+            end
+        end
+        hiddenGuis = {}
+    end
+end
+
+----------------------------------------------------------------
+-- SCREEN GUI (FREECAM MENU)
+----------------------------------------------------------------
+if playerGui:FindFirstChild("FreeCamGui") then
+    playerGui.FreeCamGui:Destroy()
+end
+
+local controlGui = Instance.new("ScreenGui")
+controlGui.Name = "FreeCamGui"
+controlGui.ResetOnSpawn = false
+controlGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+controlGui.Parent = playerGui
+
+-- ปุ่มย่อ/ขยาย UI 'CAM'
+local foldBtn = Instance.new("TextButton")
+foldBtn.Size = UDim2.fromOffset(48, 48)
+foldBtn.Position = UDim2.new(0, 15, 0, 15)
+foldBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+foldBtn.Text = "CAM"
+foldBtn.Font = Enum.Font.GothamBold
+foldBtn.TextSize = 14
+foldBtn.TextColor3 = Color3.fromRGB(0, 180, 255)
+foldBtn.ZIndex = 10
+foldBtn.Active = true
+foldBtn.Draggable = true
+foldBtn.Parent = controlGui
+Instance.new("UICorner", foldBtn).CornerRadius = UDim.new(0, 12)
+local foldStroke = Instance.new("UIStroke", foldBtn)
+foldStroke.Color = Color3.fromRGB(0, 180, 255)
+foldStroke.Thickness = 2
+
+-- เมนูหลัก
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.fromOffset(230, 435)
+mainFrame.Position = UDim2.new(0, 70, 0, 15)
+mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+mainFrame.BorderSizePixel = 0
+mainFrame.ZIndex = 9
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = controlGui
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 12)
+local mainStroke = Instance.new("UIStroke", mainFrame)
+mainStroke.Color = Color3.fromRGB(50, 50, 60)
+mainStroke.Thickness = 1.5
+
+-- หัวข้อ
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -20, 0, 30)
+title.Position = UDim2.new(0, 10, 0, 5)
+title.BackgroundTransparency = 1
+title.Text = "FREECAM (BETA VERSION)"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 12
+title.TextColor3 = Color3.fromRGB(220, 220, 240)
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = mainFrame
+
+-- ปุ่ม FreeCam On/Off
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(1, -20, 0, 28)
+toggleBtn.Position = UDim2.new(0, 10, 0, 35)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 80)
+toggleBtn.Text = "FreeCam: OFF"
+toggleBtn.Font = Enum.Font.GothamMedium
+toggleBtn.TextSize = 11
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Parent = mainFrame
+Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 6)
+
+-- ปุ่ม Joystick On/Off
+local joyToggleBtn = Instance.new("TextButton")
+joyToggleBtn.Size = UDim2.new(1, -20, 0, 28)
+joyToggleBtn.Position = UDim2.new(0, 10, 0, 67)
+joyToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+joyToggleBtn.Text = "Joystick: Visible"
+joyToggleBtn.Font = Enum.Font.GothamMedium
+joyToggleBtn.TextSize = 11
+joyToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+joyToggleBtn.Parent = mainFrame
+Instance.new("UICorner", joyToggleBtn).CornerRadius = UDim.new(0, 6)
+
+-- ปุ่ม Zoom UI On/Off
+local zoomToggleBtn = Instance.new("TextButton")
+zoomToggleBtn.Size = UDim2.new(1, -20, 0, 28)
+zoomToggleBtn.Position = UDim2.new(0, 10, 0, 99)
+zoomToggleBtn.BackgroundColor3 = Color3.fromRGB(140, 0, 215)
+zoomToggleBtn.Text = "Zoom UI: Visible"
+zoomToggleBtn.Font = Enum.Font.GothamMedium
+zoomToggleBtn.TextSize = 11
+zoomToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+zoomToggleBtn.Parent = mainFrame
+Instance.new("UICorner", zoomToggleBtn).CornerRadius = UDim.new(0, 6)
+
+-- ปุ่ม Camera Lean UI On/Off
+local leanToggleBtn = Instance.new("TextButton")
+leanToggleBtn.Size = UDim2.new(1, -20, 0, 28)
+leanToggleBtn.Position = UDim2.new(0, 10, 0, 131)
+leanToggleBtn.BackgroundColor3 = Color3.fromRGB(215, 120, 0)
+leanToggleBtn.Text = "Camera Lean: Visible"
+leanToggleBtn.Font = Enum.Font.GothamMedium
+leanToggleBtn.TextSize = 11
+leanToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+leanToggleBtn.Parent = mainFrame
+Instance.new("UICorner", leanToggleBtn).CornerRadius = UDim.new(0, 6)
+
+-- ปุ่ม Clear Game UI
+local clearUiBtn = Instance.new("TextButton")
+clearUiBtn.Size = UDim2.new(1, -20, 0, 28)
+clearUiBtn.Position = UDim2.new(0, 10, 0, 163)
+clearUiBtn.BackgroundColor3 = Color3.fromRGB(230, 70, 0)
+clearUiBtn.Text = "Hide Game UI: OFF"
+clearUiBtn.Font = Enum.Font.GothamBold
+clearUiBtn.TextSize = 11
+clearUiBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+clearUiBtn.Parent = mainFrame
+Instance.new("UICorner", clearUiBtn).CornerRadius = UDim.new(0, 6)
+
+----------------------------------------------------------------
+-- ADVANCED INPUT + SLIDER CREATOR
+----------------------------------------------------------------
+local function createInteractiveSlider(titleText, maxHintText, posY, minVal, maxVal, defaultVal, isPercent, callback)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -85, 0, 14)
+    label.Position = UDim2.new(0, 10, 0, posY)
+    label.BackgroundTransparency = 1
+    label.Text = titleText .. " " .. maxHintText
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 10
+    label.TextColor3 = Color3.fromRGB(0, 180, 255)
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = mainFrame
+
+    local textBox = Instance.new("TextBox")
+    textBox.Size = UDim2.fromOffset(55, 18)
+    textBox.Position = UDim2.new(1, -65, 0, posY - 2)
+    textBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    textBox.Text = isPercent and string.format("%d%%", defaultVal * 100) or string.format("%.1f", defaultVal)
+    textBox.Font = Enum.Font.GothamBold
+    textBox.TextSize = 10
+    textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textBox.ClearTextOnFocus = false
+    textBox.Parent = mainFrame
+    Instance.new("UICorner", textBox).CornerRadius = UDim.new(0, 4)
+    local tbStroke = Instance.new("UIStroke", textBox)
+    tbStroke.Color = Color3.fromRGB(60, 60, 75)
+    tbStroke.Thickness = 1
+
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.new(1, -20, 0, 10)
+    bg.Position = UDim2.new(0, 10, 0, posY + 18)
+    bg.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    bg.BorderSizePixel = 0
+    bg.Parent = mainFrame
+    Instance.new("UICorner", bg).CornerRadius = UDim.new(1, 0)
+
+    local fill = Instance.new("Frame")
+    local initRatio = (defaultVal - minVal) / (maxVal - minVal)
+    fill.Size = UDim2.new(math.clamp(initRatio, 0, 1), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(0, 180, 255)
+    fill.BorderSizePixel = 0
+    fill.Parent = bg
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+
+    local function setVal(newVal, updateTextBox)
+        local clamped = math.clamp(newVal, minVal, maxVal)
+        local ratio = (clamped - minVal) / (maxVal - minVal)
+        fill.Size = UDim2.new(math.clamp(ratio, 0, 1), 0, 1, 0)
+        
+        if updateTextBox then
+            if isPercent then
+                textBox.Text = string.format("%d%%", math.floor(clamped * 100))
+            else
+                textBox.Text = string.format("%.1f", clamped)
+            end
+        end
+        callback(clamped)
+    end
+
+    local dragging = false
+    local function updateFromInput(input)
+        local rel = math.clamp((input.Position.X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0.0, 1.0)
+        local calculatedVal = minVal + (rel * (maxVal - minVal))
+        setVal(calculatedVal, true)
+    end
+
+    track(bg.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            updateFromInput(input)
+        end
+    end))
+
+    track(UIS.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            updateFromInput(input)
+        end
+    end))
+
+    track(UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end))
+
+    track(textBox.FocusLost:Connect(function()
+        local rawText = textBox.Text:gsub("%%", "")
+        local num = tonumber(rawText)
+        if num then
+            if isPercent then num = num / 100 end
+            setVal(num, true)
+        else
+            setVal(defaultVal, true)
+        end
+    end))
+end
+
+-- สไลเดอร์ความเร็ว, ความนุ่มนวล (Smoothness), และ UI Opacity
+createInteractiveSlider("Speed", "(Max 10.0x)", 200, 0.1, 10.0, cameraSpeed, false, function(val) cameraSpeed = val end)
+createInteractiveSlider("Smoothness", "(Ultra)", 242, 0.01, 1.0, cameraSmoothness, true, function(val) cameraSmoothness = val end)
+
+----------------------------------------------------------------
+-- FLOATING & DRAGGABLE ZOOM BUTTONS (+ / -)
+----------------------------------------------------------------
+local zoomFrame = Instance.new("Frame")
+zoomFrame.Size = UDim2.fromOffset(45, 96)
+zoomFrame.Position = UDim2.new(1, -60, 0.5, -48)
+zoomFrame.BackgroundTransparency = 1
+zoomFrame.Active = true
+zoomFrame.Draggable = true
+zoomFrame.Parent = controlGui
+
+local zoomInBtn = Instance.new("TextButton")
+zoomInBtn.Size = UDim2.fromOffset(44, 44)
+zoomInBtn.Position = UDim2.new(0, 0, 0, 0)
+zoomInBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+zoomInBtn.BackgroundTransparency = 1 - joystickOpacity
+zoomInBtn.Text = "+"
+zoomInBtn.Font = Enum.Font.GothamBold
+zoomInBtn.TextSize = 22
+zoomInBtn.TextColor3 = Color3.fromRGB(0, 180, 255)
+zoomInBtn.Parent = zoomFrame
+Instance.new("UICorner", zoomInBtn).CornerRadius = UDim.new(0, 10)
+local zoomInStroke = Instance.new("UIStroke", zoomInBtn)
+zoomInStroke.Color = Color3.fromRGB(0, 180, 255)
+zoomInStroke.Transparency = 1 - joystickOpacity
+zoomInStroke.Thickness = 1.5
+
+local zoomOutBtn = Instance.new("TextButton")
+zoomOutBtn.Size = UDim2.fromOffset(44, 44)
+zoomOutBtn.Position = UDim2.new(0, 0, 0, 50)
+zoomOutBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+zoomOutBtn.BackgroundTransparency = 1 - joystickOpacity
+zoomOutBtn.Text = "-"
+zoomOutBtn.Font = Enum.Font.GothamBold
+zoomOutBtn.TextSize = 26
+zoomOutBtn.TextColor3 = Color3.fromRGB(0, 180, 255)
+zoomOutBtn.Parent = zoomFrame
+Instance.new("UICorner", zoomOutBtn).CornerRadius = UDim.new(0, 10)
+local zoomOutStroke = Instance.new("UIStroke", zoomOutBtn)
+zoomOutStroke.Color = Color3.fromRGB(0, 180, 255)
+zoomOutStroke.Transparency = 1 - joystickOpacity
+zoomOutStroke.Thickness = 1.5
+
+----------------------------------------------------------------
+-- FLOATING & DRAGGABLE CAMERA LEAN BUTTONS (L / R)
+----------------------------------------------------------------
+local leanFrame = Instance.new("Frame")
+leanFrame.Size = UDim2.fromOffset(96, 45)
+leanFrame.Position = UDim2.new(1, -165, 0.5, -48)
+leanFrame.BackgroundTransparency = 1
+leanFrame.Active = true
+leanFrame.Draggable = true
+leanFrame.Parent = controlGui
+
+local leanLeftBtn = Instance.new("TextButton")
+leanLeftBtn.Size = UDim2.fromOffset(44, 44)
+leanLeftBtn.Position = UDim2.new(0, 0, 0, 0)
+leanLeftBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+leanLeftBtn.BackgroundTransparency = 1 - joystickOpacity
+leanLeftBtn.Text = "L"
+leanLeftBtn.Font = Enum.Font.GothamBold
+leanLeftBtn.TextSize = 20
+leanLeftBtn.TextColor3 = Color3.fromRGB(255, 170, 0)
+leanLeftBtn.Parent = leanFrame
+Instance.new("UICorner", leanLeftBtn).CornerRadius = UDim.new(0, 10)
+local leanLeftStroke = Instance.new("UIStroke", leanLeftBtn)
+leanLeftStroke.Color = Color3.fromRGB(255, 170, 0)
+leanLeftStroke.Transparency = 1 - joystickOpacity
+leanLeftStroke.Thickness = 1.5
+
+local leanRightBtn = Instance.new("TextButton")
+leanRightBtn.Size = UDim2.fromOffset(44, 44)
+leanRightBtn.Position = UDim2.new(0, 50, 0, 0)
+leanRightBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+leanRightBtn.BackgroundTransparency = 1 - joystickOpacity
+leanRightBtn.Text = "R"
+leanRightBtn.Font = Enum.Font.GothamBold
+leanRightBtn.TextSize = 20
+leanRightBtn.TextColor3 = Color3.fromRGB(255, 170, 0)
+leanRightBtn.Parent = leanFrame
+Instance.new("UICorner", leanRightBtn).CornerRadius = UDim.new(0, 10)
+local leanRightStroke = Instance.new("UIStroke", leanRightBtn)
+leanRightStroke.Color = Color3.fromRGB(255, 170, 0)
+leanRightStroke.Transparency = 1 - joystickOpacity
+leanRightStroke.Thickness = 1.5
+
+----------------------------------------------------------------
+-- JOYSTICK DESIGN & TRANSPARENCY
+----------------------------------------------------------------
+local sizeOuter = 100
+local sizeInner = 44
+local radius = sizeOuter / 2
+
+local outer = Instance.new("Frame")
+outer.Size = UDim2.fromOffset(sizeOuter, sizeOuter)
+outer.Position = UDim2.new(0, 25, 1, -135)
+outer.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+outer.BackgroundTransparency = 1 - joystickOpacity
+outer.Parent = controlGui
+outer.BorderSizePixel = 0
+outer.ZIndex = 8
+outer.Active = true
+Instance.new("UICorner", outer).CornerRadius = UDim.new(1, 0)
+local outerStroke = Instance.new("UIStroke", outer)
+outerStroke.Color = Color3.fromRGB(0, 180, 255)
+outerStroke.Transparency = 1 - joystickOpacity
+outerStroke.Thickness = 1.5
+
+local inner = Instance.new("Frame")
+inner.Size = UDim2.fromOffset(sizeInner, sizeInner)
+inner.Position = UDim2.new(0.5, -sizeInner/2, 0.5, -sizeInner/2)
+inner.BackgroundColor3 = Color3.fromRGB(0, 180, 255)
+inner.BackgroundTransparency = 1 - joystickOpacity
+inner.BorderSizePixel = 0
+inner.ZIndex = 9
+inner.Parent = outer
+Instance.new("UICorner", inner).CornerRadius = UDim.new(1, 0)
+
+local function applyUIOpacity(val)
+    joystickOpacity = val
+    local transp = 1 - val
+    if outer and inner and outerStroke then
+        outer.BackgroundTransparency = transp
+        inner.BackgroundTransparency = transp
+        outerStroke.Transparency = transp
+    end
+    if zoomInBtn and zoomOutBtn and zoomInStroke and zoomOutStroke then
+        zoomInBtn.BackgroundTransparency = transp
+        zoomOutBtn.BackgroundTransparency = transp
+        zoomInStroke.Transparency = transp
+        zoomOutStroke.Transparency = transp
+    end
+    if leanLeftBtn and leanRightBtn and leanLeftStroke and leanRightStroke then
+        leanLeftBtn.BackgroundTransparency = transp
+        leanRightBtn.BackgroundTransparency = transp
+        leanLeftStroke.Transparency = transp
+        leanRightStroke.Transparency = transp
+    end
+end
+
+createInteractiveSlider("UI Opacity", "(Max 100%)", 284, 0.0, 1.0, joystickOpacity, true, function(val)
+    applyUIOpacity(val)
+end)
+
+-- ปุ่ม Unload
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(1, -20, 0, 30)
+closeBtn.Position = UDim2.new(0, 10, 0, 390)
+closeBtn.BackgroundColor3 = Color3.fromRGB(190, 40, 50)
+closeBtn.Text = "Unload Script"
+closeBtn.Font = Enum.Font.GothamMedium
+closeBtn.TextSize = 11
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Parent = mainFrame
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+
+----------------------------------------------------------------
+-- JOYSTICK TOUCH LOGIC
+----------------------------------------------------------------
+local draggingJoy = false
+local activeTouchJoy = nil
+local center = Vector2.new(0,0)
+
+local function updateCenter()
+    center = Vector2.new(outer.AbsolutePosition.X + radius, outer.AbsolutePosition.Y + radius)
+end
+
+local function moveInner(posV2)
+    local dir = posV2 - center
+    local dist = math.min(dir.Magnitude, radius)
+    local offset = dir.Magnitude > 0 and dir.Unit * dist or Vector2.new(0,0)
+    inner.Position = UDim2.new(0.5, offset.X - sizeInner/2, 0.5, offset.Y - sizeInner/2)
+    
+    _G.JoystickData.DraggingLevel = math.clamp(dist / radius, 0, 1)
+    _G.JoystickData.Direction = Vector3.new(offset.X / radius, 0, offset.Y / radius)
+end
+
+track(outer.InputBegan:Connect(function(input)
+    if not toggle.Value or not showJoystick.Value then return end
+    if (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) and not draggingJoy then
+        updateCenter()
+        draggingJoy = true
+        activeTouchJoy = input
+        moveInner(Vector2.new(input.Position.X, input.Position.Y))
+    end
+end))
+
+track(UIS.InputChanged:Connect(function(input)
+    if draggingJoy and input == activeTouchJoy then
+        moveInner(Vector2.new(input.Position.X, input.Position.Y))
+    end
+end))
+
+local function resetJoy(input)
+    if draggingJoy and input == activeTouchJoy then
+        draggingJoy = false
+        activeTouchJoy = nil
+        inner.Position = UDim2.new(0.5, -sizeInner/2, 0.5, -sizeInner/2)
+        _G.JoystickData.DraggingLevel = 0
+        _G.JoystickData.Direction = Vector3.new(0,0,0)
+    end
+end
+track(UIS.InputEnded:Connect(resetJoy))
+
+----------------------------------------------------------------
+-- UI TOGGLE DISPLAY LOGIC
+----------------------------------------------------------------
+local isFolded = false
+
+local function updateElementsVisible()
+    foldBtn.Visible = true
+    mainFrame.Visible = not isFolded
+    outer.Visible = toggle.Value and showJoystick.Value
+    zoomFrame.Visible = toggle.Value and showZoomButtons.Value
+    leanFrame.Visible = toggle.Value and showLeanButtons.Value
+end
+
+track(clearUiBtn.MouseButton1Click:Connect(function()
+    isGameUICleared = not isGameUICleared
+    setGameUICleared(isGameUICleared)
+    clearUiBtn.Text = isGameUICleared and "Hide Game UI: ON" or "Hide Game UI: OFF"
+    clearUiBtn.BackgroundColor3 = isGameUICleared and Color3.fromRGB(0, 170, 120) or Color3.fromRGB(230, 70, 0)
+end))
+
+track(joyToggleBtn.MouseButton1Click:Connect(function()
+    showJoystick.Value = not showJoystick.Value
+    joyToggleBtn.Text = showJoystick.Value and "Joystick: Visible" or "Joystick: Hidden"
+    joyToggleBtn.BackgroundColor3 = showJoystick.Value and Color3.fromRGB(0, 120, 215) or Color3.fromRGB(70, 70, 80)
+    updateElementsVisible()
+end))
+
+track(zoomToggleBtn.MouseButton1Click:Connect(function()
+    showZoomButtons.Value = not showZoomButtons.Value
+    zoomToggleBtn.Text = showZoomButtons.Value and "Zoom UI: Visible" or "Zoom UI: Hidden"
+    zoomToggleBtn.BackgroundColor3 = showZoomButtons.Value and Color3.fromRGB(140, 0, 215) or Color3.fromRGB(70, 70, 80)
+    updateElementsVisible()
+end))
+
+track(leanToggleBtn.MouseButton1Click:Connect(function()
+    showLeanButtons.Value = not showLeanButtons.Value
+    leanToggleBtn.Text = showLeanButtons.Value and "Camera Lean: Visible" or "Camera Lean: Hidden"
+    leanToggleBtn.BackgroundColor3 = showLeanButtons.Value and Color3.fromRGB(215, 120, 0) or Color3.fromRGB(70, 70, 80)
+    updateElementsVisible()
+end))
+
+track(foldBtn.MouseButton1Click:Connect(function()
+    isFolded = not isFolded
+    mainFrame.Visible = not isFolded
+end))
+
+----------------------------------------------------------------
+-- ROTATION & TOUCH LOGIC (WITH ULTRA SMOOTH INERTIA)
+----------------------------------------------------------------
+local isRightMouseDown = false
+
+track(UIS.InputBegan:Connect(function(input)
+    if not toggle.Value then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isRightMouseDown = true
+    end
+end))
+
+track(UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        isRightMouseDown = false
+    end
+end))
+
+track(UIS.InputChanged:Connect(function(input)
+    if not toggle.Value then return end
+    
+    if input.UserInputType == Enum.UserInputType.Touch and input ~= activeTouchJoy then
+        local delta = input.Delta
+        targetYaw = targetYaw - delta.X * (touchSensitivity / 10)
+        targetPitch = math.clamp(targetPitch - delta.Y * (touchSensitivity / 10), -math.rad(80), math.rad(80))
+    elseif isRightMouseDown and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Delta
+        targetYaw = targetYaw - delta.X * (touchSensitivity / 10)
+        targetPitch = math.clamp(targetPitch - delta.Y * (touchSensitivity / 10), -math.rad(80), math.rad(80))
+    end
+end))
+
+----------------------------------------------------------------
+-- ZOOM LOGIC
+----------------------------------------------------------------
+local isHoldingZoomIn = false
+local isHoldingZoomOut = false
+
+track(zoomInBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isHoldingZoomIn = true
+    end
+end))
+
+track(zoomInBtn.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isHoldingZoomIn = false
+    end
+end))
+
+track(zoomOutBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isHoldingZoomOut = true
+    end
+end))
+
+track(zoomOutBtn.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isHoldingZoomOut = false
+    end
+end))
+
+track(UIS.InputChanged:Connect(function(input)
+    if not toggle.Value then return end
+    if input.UserInputType == Enum.UserInputType.MouseWheel then
+        targetFOV = math.clamp(targetFOV - input.Position.Z * 4.0, minFOV, maxFOV)
+    end
+end))
+
+local initialPinchDistance = nil
+local initialFOV = minFOV
+
+track(UIS.TouchPinch:Connect(function(touchPositions, scale, velocity, state)
+    if not toggle.Value then return end
+    if state == Enum.UserInputState.Begin then
+        initialPinchDistance = (touchPositions[1] - touchPositions[2]).Magnitude
+        initialFOV = targetFOV
+    elseif state == Enum.UserInputState.Change and initialPinchDistance then
+        local currentDistance = (touchPositions[1] - touchPositions[2]).Magnitude
+        local distanceDelta = currentDistance - initialPinchDistance
+        targetFOV = math.clamp(initialFOV - (distanceDelta * 0.15), minFOV, maxFOV)
+    elseif state == Enum.UserInputState.End then
+        initialPinchDistance = nil
+    end
+end))
+
+----------------------------------------------------------------
+-- CAMERA LEAN LOGIC
+----------------------------------------------------------------
+local isHoldingLeanLeft = false
+local isHoldingLeanRight = false
+local lastLeanLeftTap = 0
+local lastLeanRightTap = 0
+
+track(leanLeftBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        local now = tick()
+        if now - lastLeanLeftTap < 0.3 then targetRoll = 0 end
+        lastLeanLeftTap = now
+        isHoldingLeanLeft = true
+    end
+end))
+
+track(leanLeftBtn.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isHoldingLeanLeft = false
+    end
+end))
+
+track(leanRightBtn.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        local now = tick()
+        if now - lastLeanRightTap < 0.3 then targetRoll = 0 end
+        lastLeanRightTap = now
+        isHoldingLeanRight = true
+    end
+end))
+
+track(leanRightBtn.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isHoldingLeanRight = false
+    end
+end))
+
+----------------------------------------------------------------
+-- MAIN RENDER LOOP & ULTRA SMOOTH INTERPOLATION
+----------------------------------------------------------------
+local function applyToggle(state)
+    if state then
+        targetCFrame = camera.CFrame
+        camCFrame = camera.CFrame
+        local rx, ry, rz = camCFrame:ToOrientation()
+        pitch = rx
+        yaw = ry
+        targetPitch = rx
+        targetYaw = ry
+        roll = rz
+        targetRoll = rz
+
+        camera.CameraType = Enum.CameraType.Scriptable
+        camera.CameraSubject = nil
+        toggleBtn.Text = "FreeCam: ON"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 120)
+    else
+        camera.CameraType = Enum.CameraType.Custom
+        local char = player.Character or player.CharacterAdded:Wait()
+        camera.CameraSubject = char:FindFirstChildOfClass("Humanoid")
+        player.CameraMinZoomDistance = origMinZoom
+        player.CameraMaxZoomDistance = origMaxZoom
+        toggleBtn.Text = "FreeCam: OFF"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 80)
+    end
+    updateElementsVisible()
+end
+
+track(toggle.Changed:Connect(applyToggle))
+applyToggle(toggle.Value)
+
+track(toggleBtn.MouseButton1Click:Connect(function()
+    toggle.Value = not toggle.Value
+end))
+
+track(RunService.RenderStepped:Connect(function(dt)
+    if toggle.Value then
+        if camera.CameraType ~= Enum.CameraType.Scriptable then
+            camera.CameraType = Enum.CameraType.Scriptable
+            camera.CameraSubject = nil
+        end
+
+        if isHoldingZoomIn then
+            targetFOV = math.clamp(targetFOV - (40 * dt), minFOV, maxFOV)
+        elseif isHoldingZoomOut then
+            targetFOV = math.clamp(targetFOV + (40 * dt), minFOV, maxFOV)
+        end
+
+        local isLeanLeft = isHoldingLeanLeft or UIS:IsKeyDown(Enum.KeyCode.C)
+        local isLeanRight = isHoldingLeanRight or UIS:IsKeyDown(Enum.KeyCode.V)
+
+        if UIS:IsKeyDown(Enum.KeyCode.B) then
+            targetRoll = 0
+        elseif isLeanLeft then
+            targetRoll = targetRoll + (leanSpeed * dt)
+        elseif isLeanRight then
+            targetRoll = targetRoll - (leanSpeed * dt)
+        end
+
+        camera.FieldOfView = camera.FieldOfView + (targetFOV - camera.FieldOfView) * math.min(dt * 12, 1)
+
+        -- Ultra Smooth Inertia สำหรับการหมุน (Interpolate มุม Yaw และ Pitch)
+        local rotSmoothFactor = math.clamp(1 - (cameraSmoothness * 0.9), 0.05, 1.0)
+        yaw = yaw + (targetYaw - yaw) * math.min(dt * rotSmoothFactor * 25, 1)
+        pitch = pitch + (targetPitch - pitch) * math.min(dt * rotSmoothFactor * 25, 1)
+
+        local moveDir = Vector3.new(0, 0, 0)
+        if UIS:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + Vector3.new(0, 0, -1) end
+        if UIS:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir + Vector3.new(0, 0, 1) end
+        if UIS:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir + Vector3.new(-1, 0, 0) end
+        if UIS:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + Vector3.new(1, 0, 0) end
+        if UIS:IsKeyDown(Enum.KeyCode.E) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+        if UIS:IsKeyDown(Enum.KeyCode.Q) then moveDir = moveDir + Vector3.new(0, -1, 0) end
+
+        local joyLevel = _G.JoystickData.DraggingLevel
+        local joyDir = _G.JoystickData.Direction
+        if joyLevel > 0 then
+            moveDir = moveDir + Vector3.new(joyDir.X, 0, joyDir.Z) * joyLevel
+        end
+
+        roll = roll + (targetRoll - roll) * math.min(dt * 12, 1)
+        local rotCFrame = CFrame.Angles(0, yaw, 0) * CFrame.Angles(pitch, 0, 0) * CFrame.Angles(0, 0, roll)
+        
+        if moveDir.Magnitude > 0 then
+            moveDir = moveDir.Unit
+            local worldMove = rotCFrame:VectorToWorldSpace(moveDir)
+            targetCFrame = targetCFrame + (worldMove * cameraSpeed * dt * 50)
+        end
+
+        targetCFrame = CFrame.new(targetCFrame.Position) * rotCFrame
+
+        -- Lerp ตำแหน่งกล้องแบบ Ultra Smooth
+        local lerpSpeed = math.clamp(1 - (cameraSmoothness * 0.95), 0.01, 1.0)
+        local lerpAlpha = math.clamp(lerpSpeed * dt * 35, 0.001, 1)
+        
+        camCFrame = camCFrame:Lerp(targetCFrame, lerpAlpha)
+        camera.CFrame = camCFrame
+    else
+        camera.FieldOfView = camera.FieldOfView + (origFOV - camera.FieldOfView) * math.min(dt * 10, 1)
+    end
+end))
+
+----------------------------------------------------------------
+-- UNLOAD SCRIPT
+----------------------------------------------------------------
+local closed = false
+track(closeBtn.MouseButton1Click:Connect(function()
+    if closed then return end
+    closed = true
+
+    toggle.Value = false
+    setGameUICleared(false)
+
+    camera.CameraType = Enum.CameraType.Custom
+    local char = player.Character
+    if char then
+        camera.CameraSubject = char:FindFirstChildOfClass("Humanoid")
+    end
+    player.CameraMinZoomDistance = origMinZoom
+    player.CameraMaxZoomDistance = origMaxZoom
+    camera.FieldOfView = origFOV
+
+    for _, conn in ipairs(connections) do
+        if conn and conn.Connected then
+            conn:Disconnect()
+        end
+    end
+
+    controlGui:Destroy()
+    toggle:Destroy()
+    showJoystick:Destroy()
+    showZoomButtons:Destroy()
+    showLeanButtons:Destroy()
+end))
+
+----------------------------------------------------------------
+-- SHOW INITIAL NOTIFICATION
+----------------------------------------------------------------
+showNotification("FreeCam Script (Beta Version) Loaded!", 4)

@@ -3,6 +3,7 @@ local player = Players.LocalPlayer
 local UIS = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
+local TweenService = game:GetService("TweenService")
 local camera = workspace.CurrentCamera
 
 local playerGui = player:WaitForChild("PlayerGui")
@@ -14,12 +15,56 @@ local function track(conn)
 end
 
 ----------------------------------------------------------------
+-- THEME (New modern glass palette)
+----------------------------------------------------------------
+local Theme = {
+    PanelTop      = Color3.fromRGB(26, 22, 38),
+    PanelBottom   = Color3.fromRGB(16, 16, 22),
+    Card          = Color3.fromRGB(32, 29, 46),
+    CardHover     = Color3.fromRGB(42, 38, 58),
+    Accent        = Color3.fromRGB(138, 110, 255),   -- violet
+    AccentSoft    = Color3.fromRGB(96, 78, 190),
+    Cyan          = Color3.fromRGB(56, 200, 255),
+    Green         = Color3.fromRGB(58, 214, 152),
+    Orange        = Color3.fromRGB(255, 165, 74),
+    Purple        = Color3.fromRGB(178, 102, 255),
+    Red           = Color3.fromRGB(255, 92, 92),
+    Off           = Color3.fromRGB(58, 58, 70),
+    TextMain      = Color3.fromRGB(238, 240, 250),
+    TextSub       = Color3.fromRGB(158, 162, 182),
+    Stroke        = Color3.fromRGB(70, 66, 92),
+}
+
+local function tween(obj, props, dur, style)
+    TweenService:Create(obj, TweenInfo.new(dur or 0.18, style or Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+end
+
+local function addGradient(inst, colorSeq, rotation)
+    local grad = Instance.new("UIGradient")
+    grad.Color = colorSeq
+    grad.Rotation = rotation or 90
+    grad.Parent = inst
+    return grad
+end
+
+local function addHover(btn, baseColor, hoverColor)
+    track(btn.MouseEnter:Connect(function()
+        tween(btn, {BackgroundColor3 = hoverColor}, 0.12)
+    end))
+    track(btn.MouseLeave:Connect(function()
+        tween(btn, {BackgroundColor3 = baseColor}, 0.12)
+    end))
+end
+
+----------------------------------------------------------------
 -- SETTINGS & VARIABLES (ULTRA SMOOTH CONFIG)
 ----------------------------------------------------------------
 local cameraSpeed = 1.0       -- ความเร็วการเคลื่อนที่
 local cameraSmoothness = 0.25 -- ความนุ่มนวลเริ่มต้น
 local touchSensitivity = 0.2  -- ความไวสัมผัสหมุนมุมมอง
 local joystickOpacity = 0.0   -- ความทึบ UI เริ่มต้นที่ 0%
+local stealthMode = false     -- โหมดอัดจอ: ซ่อน UI สคริปต์ทั้งหมด แต่ยังกดได้
+local stealthCache = {}
 
 local toggle = Instance.new("BoolValue")
 toggle.Name = "FreeMoveEnabled"
@@ -75,6 +120,7 @@ _G.JoystickData = {
 -- NOTIFICATION SYSTEM (BETA MESSAGE)
 ----------------------------------------------------------------
 local function showNotification(message, duration)
+    if stealthMode then return end
     pcall(function()
         local notifGui = playerGui:FindFirstChild("FreeCamNotifGui")
         if notifGui then notifGui:Destroy() end
@@ -86,30 +132,56 @@ local function showNotification(message, duration)
         notifGui.Parent = playerGui
 
         local notifFrame = Instance.new("Frame")
-        notifFrame.Size = UDim2.fromOffset(260, 45)
-        notifFrame.Position = UDim2.new(0.5, -130, 0, 50)
-        notifFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
-        notifFrame.BackgroundTransparency = 0.1
+        notifFrame.Size = UDim2.fromOffset(280, 48)
+        notifFrame.Position = UDim2.new(0.5, -140, 0, 40)
+        notifFrame.BackgroundColor3 = Theme.PanelBottom
+        notifFrame.BackgroundTransparency = 0.05
         notifFrame.BorderSizePixel = 0
+        notifFrame.ClipsDescendants = true
         notifFrame.Parent = notifGui
-        Instance.new("UICorner", notifFrame).CornerRadius = UDim.new(0, 10)
-        
+        Instance.new("UICorner", notifFrame).CornerRadius = UDim.new(0, 12)
+
+        addGradient(notifFrame, ColorSequence.new(Theme.PanelTop, Theme.PanelBottom), 100)
+
         local stroke = Instance.new("UIStroke", notifFrame)
-        stroke.Color = Color3.fromRGB(0, 180, 255)
-        stroke.Thickness = 1.5
+        stroke.Color = Theme.Accent
+        stroke.Thickness = 1.4
+        stroke.Transparency = 0.2
+
+        local accentBar = Instance.new("Frame")
+        accentBar.Size = UDim2.new(0, 4, 1, 0)
+        accentBar.BackgroundColor3 = Theme.Accent
+        accentBar.BorderSizePixel = 0
+        accentBar.Parent = notifFrame
+        Instance.new("UICorner", accentBar).CornerRadius = UDim.new(0, 12)
 
         local notifText = Instance.new("TextLabel")
-        notifText.Size = UDim2.new(1, 0, 1, 0)
+        notifText.Size = UDim2.new(1, -20, 1, 0)
+        notifText.Position = UDim2.new(0, 16, 0, 0)
         notifText.BackgroundTransparency = 1
-        notifText.Text = message
+        notifText.Text = "✦  " .. message
         notifText.Font = Enum.Font.GothamBold
         notifText.TextSize = 12
-        notifText.TextColor3 = Color3.fromRGB(255, 255, 255)
+        notifText.TextColor3 = Theme.TextMain
+        notifText.TextXAlignment = Enum.TextXAlignment.Left
         notifText.Parent = notifFrame
+
+        notifFrame.BackgroundTransparency = 1
+        stroke.Transparency = 1
+        notifText.TextTransparency = 1
+        accentBar.BackgroundTransparency = 1
+        tween(notifFrame, {BackgroundTransparency = 0.05}, 0.25)
+        tween(stroke, {Transparency = 0.2}, 0.25)
+        tween(notifText, {TextTransparency = 0}, 0.25)
+        tween(accentBar, {BackgroundTransparency = 0}, 0.25)
 
         task.delay(duration or 3, function()
             if notifGui and notifGui.Parent then
-                notifGui:Destroy()
+                tween(notifFrame, {BackgroundTransparency = 1}, 0.2)
+                tween(notifText, {TextTransparency = 1}, 0.2)
+                task.delay(0.2, function()
+                    if notifGui and notifGui.Parent then notifGui:Destroy() end
+                end)
             end
         end)
     end)
@@ -157,162 +229,411 @@ controlGui.ResetOnSpawn = false
 controlGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 controlGui.Parent = playerGui
 
--- ปุ่มย่อ/ขยาย UI 'CAM'
+-- ปุ่มย่อ/ขยาย UI (วงกลม)
 local foldBtn = Instance.new("TextButton")
-foldBtn.Size = UDim2.fromOffset(48, 48)
+foldBtn.Size = UDim2.fromOffset(50, 50)
 foldBtn.Position = UDim2.new(0, 15, 0, 15)
-foldBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-foldBtn.Text = "CAM"
+foldBtn.BackgroundColor3 = Theme.PanelTop
+foldBtn.Text = "🎥"
 foldBtn.Font = Enum.Font.GothamBold
-foldBtn.TextSize = 14
-foldBtn.TextColor3 = Color3.fromRGB(0, 180, 255)
+foldBtn.TextSize = 20
+foldBtn.TextColor3 = Theme.Accent
+foldBtn.AutoButtonColor = false
 foldBtn.ZIndex = 10
 foldBtn.Active = true
 foldBtn.Draggable = true
 foldBtn.Parent = controlGui
-Instance.new("UICorner", foldBtn).CornerRadius = UDim.new(0, 12)
+Instance.new("UICorner", foldBtn).CornerRadius = UDim.new(1, 0)
+addGradient(foldBtn, ColorSequence.new(Theme.PanelTop, Theme.PanelBottom), 90)
 local foldStroke = Instance.new("UIStroke", foldBtn)
-foldStroke.Color = Color3.fromRGB(0, 180, 255)
-foldStroke.Thickness = 2
+foldStroke.Color = Theme.Accent
+foldStroke.Thickness = 1.6
+foldStroke.Transparency = 0.15
+addHover(foldBtn, Theme.PanelTop, Theme.CardHover)
 
 -- เมนูหลัก
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.fromOffset(230, 435)
-mainFrame.Position = UDim2.new(0, 70, 0, 15)
-mainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+mainFrame.Size = UDim2.fromOffset(240, 527)
+mainFrame.Position = UDim2.new(0, 75, 0, 15)
+mainFrame.BackgroundColor3 = Theme.PanelBottom
 mainFrame.BorderSizePixel = 0
+mainFrame.ClipsDescendants = true
 mainFrame.ZIndex = 9
 mainFrame.Active = true
 mainFrame.Draggable = true
 mainFrame.Parent = controlGui
-Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 12)
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 16)
+addGradient(mainFrame, ColorSequence.new(Theme.PanelTop, Theme.PanelBottom), 100)
 local mainStroke = Instance.new("UIStroke", mainFrame)
-mainStroke.Color = Color3.fromRGB(50, 50, 60)
-mainStroke.Thickness = 1.5
+mainStroke.Color = Theme.Stroke
+mainStroke.Thickness = 1.3
+mainStroke.Transparency = 0.1
 
--- หัวข้อ
+local mainPad = Instance.new("UIPadding")
+mainPad.PaddingLeft = UDim.new(0, 12)
+mainPad.PaddingRight = UDim.new(0, 12)
+mainFrame.ClipsDescendants = false
+
+-- แถบหัวข้อ
+local headerBar = Instance.new("Frame")
+headerBar.Size = UDim2.new(1, 0, 0, 40)
+headerBar.Position = UDim2.new(0, 0, 0, 0)
+headerBar.BackgroundColor3 = Theme.Accent
+headerBar.BackgroundTransparency = 1
+headerBar.BorderSizePixel = 0
+headerBar.Parent = mainFrame
+
+local dot = Instance.new("Frame")
+dot.Size = UDim2.fromOffset(8, 8)
+dot.Position = UDim2.new(0, 12, 0.5, -4)
+dot.BackgroundColor3 = Theme.Green
+dot.BorderSizePixel = 0
+dot.Parent = headerBar
+Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, -20, 0, 30)
-title.Position = UDim2.new(0, 10, 0, 5)
+title.Size = UDim2.new(1, -70, 0, 18)
+title.Position = UDim2.new(0, 28, 0, 6)
 title.BackgroundTransparency = 1
-title.Text = "FREECAM (BETA VERSION)"
-title.Font = Enum.Font.GothamBold
-title.TextSize = 12
-title.TextColor3 = Color3.fromRGB(220, 220, 240)
+title.Text = "FREECAM"
+title.Font = Enum.Font.GothamBlack
+title.TextSize = 13
+title.TextColor3 = Theme.TextMain
 title.TextXAlignment = Enum.TextXAlignment.Left
-title.Parent = mainFrame
+title.Parent = headerBar
+
+local subtitle = Instance.new("TextLabel")
+subtitle.Size = UDim2.new(1, -70, 0, 14)
+subtitle.Position = UDim2.new(0, 28, 0, 22)
+subtitle.BackgroundTransparency = 1
+subtitle.Text = "Ultra Smooth · Beta"
+subtitle.Font = Enum.Font.Gotham
+subtitle.TextSize = 9
+subtitle.TextColor3 = Theme.TextSub
+subtitle.TextXAlignment = Enum.TextXAlignment.Left
+subtitle.Parent = headerBar
+
+local divider = Instance.new("Frame")
+divider.Size = UDim2.new(1, -24, 0, 1)
+divider.Position = UDim2.new(0, 12, 0, 42)
+divider.BackgroundColor3 = Theme.Stroke
+divider.BackgroundTransparency = 0.3
+divider.BorderSizePixel = 0
+divider.Parent = mainFrame
+
+-- ปุ่ม Help (?) มุมขวาบนของ header
+local helpBtn = Instance.new("TextButton")
+helpBtn.Size = UDim2.fromOffset(26, 26)
+helpBtn.Position = UDim2.new(1, -30, 0, 7)
+helpBtn.BackgroundColor3 = Theme.Card
+helpBtn.Text = "?"
+helpBtn.Font = Enum.Font.GothamBold
+helpBtn.TextSize = 14
+helpBtn.TextColor3 = Theme.Accent
+helpBtn.AutoButtonColor = false
+helpBtn.ZIndex = 11
+helpBtn.Parent = headerBar
+Instance.new("UICorner", helpBtn).CornerRadius = UDim.new(1, 0)
+local helpBtnStroke = Instance.new("UIStroke", helpBtn)
+helpBtnStroke.Color = Theme.Accent
+helpBtnStroke.Transparency = 0.4
+helpBtnStroke.Thickness = 1.2
+addHover(helpBtn, Theme.Card, Theme.CardHover)
+
+----------------------------------------------------------------
+-- HELP / INSTRUCTIONS PANEL (bilingual EN/TH, shown in-UI)
+----------------------------------------------------------------
+local helpFrame = Instance.new("Frame")
+helpFrame.Size = UDim2.fromOffset(280, 380)
+helpFrame.Position = UDim2.new(0, 330, 0, 15)
+helpFrame.BackgroundColor3 = Theme.PanelBottom
+helpFrame.BorderSizePixel = 0
+helpFrame.ZIndex = 15
+helpFrame.Active = true
+helpFrame.Draggable = true
+helpFrame.Visible = false
+helpFrame.Parent = controlGui
+Instance.new("UICorner", helpFrame).CornerRadius = UDim.new(0, 16)
+addGradient(helpFrame, ColorSequence.new(Theme.PanelTop, Theme.PanelBottom), 100)
+local helpStroke = Instance.new("UIStroke", helpFrame)
+helpStroke.Color = Theme.Accent
+helpStroke.Thickness = 1.3
+helpStroke.Transparency = 0.3
+
+local helpHeader = Instance.new("TextLabel")
+helpHeader.Size = UDim2.new(1, -50, 0, 26)
+helpHeader.Position = UDim2.new(0, 16, 0, 10)
+helpHeader.BackgroundTransparency = 1
+helpHeader.Text = "📖  HOW TO USE / วิธีใช้งาน"
+helpHeader.Font = Enum.Font.GothamBlack
+helpHeader.TextSize = 13
+helpHeader.TextColor3 = Theme.TextMain
+helpHeader.TextXAlignment = Enum.TextXAlignment.Left
+helpHeader.ZIndex = 16
+helpHeader.Parent = helpFrame
+
+local helpCloseBtn = Instance.new("TextButton")
+helpCloseBtn.Size = UDim2.fromOffset(26, 26)
+helpCloseBtn.Position = UDim2.new(1, -38, 0, 10)
+helpCloseBtn.BackgroundColor3 = Theme.Card
+helpCloseBtn.Text = "✕"
+helpCloseBtn.Font = Enum.Font.GothamBold
+helpCloseBtn.TextSize = 12
+helpCloseBtn.TextColor3 = Theme.TextMain
+helpCloseBtn.AutoButtonColor = false
+helpCloseBtn.ZIndex = 16
+helpCloseBtn.Parent = helpFrame
+Instance.new("UICorner", helpCloseBtn).CornerRadius = UDim.new(1, 0)
+addHover(helpCloseBtn, Theme.Card, Theme.Red)
+
+local helpDivider = Instance.new("Frame")
+helpDivider.Size = UDim2.new(1, -24, 0, 1)
+helpDivider.Position = UDim2.new(0, 12, 0, 40)
+helpDivider.BackgroundColor3 = Theme.Stroke
+helpDivider.BackgroundTransparency = 0.3
+helpDivider.BorderSizePixel = 0
+helpDivider.ZIndex = 16
+helpDivider.Parent = helpFrame
+
+local helpScroll = Instance.new("ScrollingFrame")
+helpScroll.Size = UDim2.new(1, -24, 1, -54)
+helpScroll.Position = UDim2.new(0, 12, 0, 48)
+helpScroll.BackgroundTransparency = 1
+helpScroll.BorderSizePixel = 0
+helpScroll.ScrollBarThickness = 4
+helpScroll.ScrollBarImageColor3 = Theme.Accent
+helpScroll.CanvasSize = UDim2.new(0, 0, 0, 640)
+helpScroll.ZIndex = 16
+helpScroll.Parent = helpFrame
+
+local helpItems = {
+    {"⏻", "Toggle FreeCam", "เปิดกดปุ่ม", "Tap FreeCam button in panel", "กดปุ่ม FreeCam ในเมนู"},
+    {"🕹️", "Move", "เคลื่อนที่", "W A S D = forward/back/left/right, E/Q = up/down, joystick on mobile", "W A S D = หน้า/หลัง/ซ้าย/ขวา, E/Q = ขึ้น/ลง, ใช้จอยสติ๊กบนมือถือ"},
+    {"🖱️", "Look around", "หมุนมุมมอง", "Hold right-click + drag (PC) or drag screen (mobile)", "คลิกขวาค้างแล้วลาก (PC) หรือลากหน้าจอ (มือถือ)"},
+    {"🔍", "Zoom", "ซูม", "+/- buttons, mouse wheel, or pinch (mobile)", "ปุ่ม +/-, เลื่อนล้อเมาส์, หรือบีบนิ้ว (มือถือ)"},
+    {"📐", "Lean/Roll", "เอียงกล้อง", "↺/↻ buttons or keys C/V. Double-tap or press B to reset", "ปุ่ม ↺/↻ หรือกด C/V, แตะ 2 ครั้งหรือกด B เพื่อรีเซ็ต"},
+    {"🎚️", "Speed / Smoothness", "ความเร็ว/ความนุ่มนวล", "Drag sliders or type a number", "ลากสไลเดอร์หรือพิมพ์ตัวเลข"},
+    {"👁️", "Show/Hide controls", "ซ่อน/แสดงปุ่ม", "Joystick / Zoom UI / Camera Lean buttons toggle each control", "ปุ่ม Joystick / Zoom UI / Camera Lean ใช้ซ่อน-แสดงปุ่มแต่ละอัน"},
+    {"🧹", "Hide game UI", "ซ่อน UI เกม", "Clears the screen for clean screenshots", "ล้างหน้าจอสำหรับถ่ายภาพสวยๆ"},
+    {"🕹️", "Joystick Size", "ขยายจอย", "Drag the slider to make the joystick bigger or smaller", "ลากสไลเดอร์เพื่อขยาย/ย่อขนาดจอยสติ๊ก"},
+    {"🎥", "Fold menu", "พับเมนู", "Tap the circular button (draggable) to collapse/expand", "กดปุ่มวงกลม (ลากย้ายได้) เพื่อย่อ/ขยายเมนู"},
+    {"✕", "Unload", "ปิดสคริปต์", "Removes the script and restores your normal camera", "ลบสคริปต์ออกทั้งหมดและคืนกล้องปกติ"},
+}
+
+local yCursor = 0
+for _, item in ipairs(helpItems) do
+    local icon, enTitle, thTitle, enDesc, thDesc = item[1], item[2], item[3], item[4], item[5]
+
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, -6, 0, 80)
+    card.Position = UDim2.new(0, 0, 0, yCursor)
+    card.BackgroundColor3 = Theme.Card
+    card.BorderSizePixel = 0
+    card.ZIndex = 16
+    card.Parent = helpScroll
+    Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
+
+    local iconLbl = Instance.new("TextLabel")
+    iconLbl.Size = UDim2.fromOffset(24, 24)
+    iconLbl.Position = UDim2.new(0, 8, 0, 8)
+    iconLbl.BackgroundTransparency = 1
+    iconLbl.Text = icon
+    iconLbl.TextSize = 14
+    iconLbl.ZIndex = 17
+    iconLbl.Parent = card
+
+    local titleLbl = Instance.new("TextLabel")
+    titleLbl.Size = UDim2.new(1, -40, 0, 16)
+    titleLbl.Position = UDim2.new(0, 36, 0, 8)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Text = enTitle .. "  ·  " .. thTitle
+    titleLbl.Font = Enum.Font.GothamBold
+    titleLbl.TextSize = 11
+    titleLbl.TextColor3 = Theme.Cyan
+    titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+    titleLbl.ZIndex = 17
+    titleLbl.Parent = card
+
+    local enLbl = Instance.new("TextLabel")
+    enLbl.Size = UDim2.new(1, -20, 0, 26)
+    enLbl.Position = UDim2.new(0, 10, 0, 28)
+    enLbl.BackgroundTransparency = 1
+    enLbl.Text = enDesc
+    enLbl.Font = Enum.Font.Gotham
+    enLbl.TextSize = 10
+    enLbl.TextColor3 = Theme.TextMain
+    enLbl.TextWrapped = true
+    enLbl.TextXAlignment = Enum.TextXAlignment.Left
+    enLbl.TextYAlignment = Enum.TextYAlignment.Top
+    enLbl.ZIndex = 17
+    enLbl.Parent = card
+
+    local thLbl = Instance.new("TextLabel")
+    thLbl.Size = UDim2.new(1, -20, 0, 26)
+    thLbl.Position = UDim2.new(0, 10, 0, 52)
+    thLbl.BackgroundTransparency = 1
+    thLbl.Text = thDesc
+    thLbl.Font = Enum.Font.Gotham
+    thLbl.TextSize = 10
+    thLbl.TextColor3 = Theme.TextSub
+    thLbl.TextWrapped = true
+    thLbl.TextXAlignment = Enum.TextXAlignment.Left
+    thLbl.TextYAlignment = Enum.TextYAlignment.Top
+    thLbl.ZIndex = 17
+    thLbl.Parent = card
+
+    yCursor = yCursor + 86
+end
+helpScroll.CanvasSize = UDim2.new(0, 0, 0, yCursor + 6)
+
+track(helpBtn.MouseButton1Click:Connect(function()
+    helpFrame.Visible = not helpFrame.Visible
+end))
+
+track(helpCloseBtn.MouseButton1Click:Connect(function()
+    helpFrame.Visible = false
+end))
+
+----------------------------------------------------------------
+-- STYLED BUTTON HELPER (card look, icon + label, keeps callback control)
+----------------------------------------------------------------
+local function styleButton(btn, color)
+    btn.AutoButtonColor = false
+    btn.Font = Enum.Font.GothamMedium
+    btn.TextSize = 11
+    btn.TextColor3 = Theme.TextMain
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    local stroke = Instance.new("UIStroke", btn)
+    stroke.Color = Color3.new(1, 1, 1)
+    stroke.Transparency = 0.9
+    stroke.Thickness = 1
+    btn.BackgroundColor3 = color
+    return stroke
+end
 
 -- ปุ่ม FreeCam On/Off
 local toggleBtn = Instance.new("TextButton")
-toggleBtn.Size = UDim2.new(1, -20, 0, 28)
-toggleBtn.Position = UDim2.new(0, 10, 0, 35)
-toggleBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 80)
-toggleBtn.Text = "FreeCam: OFF"
-toggleBtn.Font = Enum.Font.GothamMedium
-toggleBtn.TextSize = 11
-toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Size = UDim2.new(1, -24, 0, 30)
+toggleBtn.Position = UDim2.new(0, 12, 0, 52)
+toggleBtn.Text = "⏻   FreeCam: OFF"
 toggleBtn.Parent = mainFrame
-Instance.new("UICorner", toggleBtn).CornerRadius = UDim.new(0, 6)
+styleButton(toggleBtn, Theme.Off)
+toggleBtn.Font = Enum.Font.GothamBold
 
 -- ปุ่ม Joystick On/Off
 local joyToggleBtn = Instance.new("TextButton")
-joyToggleBtn.Size = UDim2.new(1, -20, 0, 28)
-joyToggleBtn.Position = UDim2.new(0, 10, 0, 67)
-joyToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
-joyToggleBtn.Text = "Joystick: Visible"
-joyToggleBtn.Font = Enum.Font.GothamMedium
-joyToggleBtn.TextSize = 11
-joyToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+joyToggleBtn.Size = UDim2.new(1, -24, 0, 28)
+joyToggleBtn.Position = UDim2.new(0, 12, 0, 88)
+joyToggleBtn.Text = "🕹️   Joystick: Visible"
 joyToggleBtn.Parent = mainFrame
-Instance.new("UICorner", joyToggleBtn).CornerRadius = UDim.new(0, 6)
+styleButton(joyToggleBtn, Theme.Cyan)
 
 -- ปุ่ม Zoom UI On/Off
 local zoomToggleBtn = Instance.new("TextButton")
-zoomToggleBtn.Size = UDim2.new(1, -20, 0, 28)
-zoomToggleBtn.Position = UDim2.new(0, 10, 0, 99)
-zoomToggleBtn.BackgroundColor3 = Color3.fromRGB(140, 0, 215)
-zoomToggleBtn.Text = "Zoom UI: Visible"
-zoomToggleBtn.Font = Enum.Font.GothamMedium
-zoomToggleBtn.TextSize = 11
-zoomToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+zoomToggleBtn.Size = UDim2.new(1, -24, 0, 28)
+zoomToggleBtn.Position = UDim2.new(0, 12, 0, 120)
+zoomToggleBtn.Text = "🔍   Zoom UI: Visible"
 zoomToggleBtn.Parent = mainFrame
-Instance.new("UICorner", zoomToggleBtn).CornerRadius = UDim.new(0, 6)
+styleButton(zoomToggleBtn, Theme.Purple)
 
 -- ปุ่ม Camera Lean UI On/Off
 local leanToggleBtn = Instance.new("TextButton")
-leanToggleBtn.Size = UDim2.new(1, -20, 0, 28)
-leanToggleBtn.Position = UDim2.new(0, 10, 0, 131)
-leanToggleBtn.BackgroundColor3 = Color3.fromRGB(215, 120, 0)
-leanToggleBtn.Text = "Camera Lean: Visible"
-leanToggleBtn.Font = Enum.Font.GothamMedium
-leanToggleBtn.TextSize = 11
-leanToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+leanToggleBtn.Size = UDim2.new(1, -24, 0, 28)
+leanToggleBtn.Position = UDim2.new(0, 12, 0, 152)
+leanToggleBtn.Text = "📐   Camera Lean: Visible"
 leanToggleBtn.Parent = mainFrame
-Instance.new("UICorner", leanToggleBtn).CornerRadius = UDim.new(0, 6)
+styleButton(leanToggleBtn, Theme.Orange)
 
 -- ปุ่ม Clear Game UI
 local clearUiBtn = Instance.new("TextButton")
-clearUiBtn.Size = UDim2.new(1, -20, 0, 28)
-clearUiBtn.Position = UDim2.new(0, 10, 0, 163)
-clearUiBtn.BackgroundColor3 = Color3.fromRGB(230, 70, 0)
-clearUiBtn.Text = "Hide Game UI: OFF"
-clearUiBtn.Font = Enum.Font.GothamBold
-clearUiBtn.TextSize = 11
-clearUiBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+clearUiBtn.Size = UDim2.new(1, -24, 0, 28)
+clearUiBtn.Position = UDim2.new(0, 12, 0, 184)
+clearUiBtn.Text = "🧹   Hide Game UI: OFF"
 clearUiBtn.Parent = mainFrame
-Instance.new("UICorner", clearUiBtn).CornerRadius = UDim.new(0, 6)
+styleButton(clearUiBtn, Color3.fromRGB(214, 92, 46))
+clearUiBtn.Font = Enum.Font.GothamBold
+
+-- ปุ่ม Stealth Mode (ซ่อน UI สคริปต์ทั้งหมดตอนอัดจอ แต่ยังกดได้ปกติ)
+local stealthBtn = Instance.new("TextButton")
+stealthBtn.Size = UDim2.new(1, -24, 0, 28)
+stealthBtn.Position = UDim2.new(0, 12, 0, 216)
+stealthBtn.Text = "🥷   Stealth Mode: OFF"
+stealthBtn.Parent = mainFrame
+styleButton(stealthBtn, Theme.Off)
 
 ----------------------------------------------------------------
 -- ADVANCED INPUT + SLIDER CREATOR
 ----------------------------------------------------------------
 local function createInteractiveSlider(titleText, maxHintText, posY, minVal, maxVal, defaultVal, isPercent, callback)
     local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, -85, 0, 14)
-    label.Position = UDim2.new(0, 10, 0, posY)
+    label.Size = UDim2.new(1, -80, 0, 14)
+    label.Position = UDim2.new(0, 12, 0, posY)
     label.BackgroundTransparency = 1
-    label.Text = titleText .. " " .. maxHintText
+    label.Text = titleText .. "  " .. maxHintText
     label.Font = Enum.Font.GothamBold
     label.TextSize = 10
-    label.TextColor3 = Color3.fromRGB(0, 180, 255)
+    label.TextColor3 = Theme.Cyan
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = mainFrame
 
     local textBox = Instance.new("TextBox")
-    textBox.Size = UDim2.fromOffset(55, 18)
-    textBox.Position = UDim2.new(1, -65, 0, posY - 2)
-    textBox.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    textBox.Size = UDim2.fromOffset(56, 20)
+    textBox.Position = UDim2.new(1, -68, 0, posY - 3)
+    textBox.BackgroundColor3 = Theme.Card
     textBox.Text = isPercent and string.format("%d%%", defaultVal * 100) or string.format("%.1f", defaultVal)
     textBox.Font = Enum.Font.GothamBold
     textBox.TextSize = 10
-    textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+    textBox.TextColor3 = Theme.TextMain
     textBox.ClearTextOnFocus = false
     textBox.Parent = mainFrame
-    Instance.new("UICorner", textBox).CornerRadius = UDim.new(0, 4)
+    Instance.new("UICorner", textBox).CornerRadius = UDim.new(0, 6)
     local tbStroke = Instance.new("UIStroke", textBox)
-    tbStroke.Color = Color3.fromRGB(60, 60, 75)
+    tbStroke.Color = Theme.Stroke
     tbStroke.Thickness = 1
 
+    -- ใหญ่กว่าเดิม (invisible) สำหรับรับสัมผัส ทำให้ลากง่ายขึ้นบนมือถือ
+    local trackWrap = Instance.new("Frame")
+    trackWrap.Size = UDim2.new(1, -24, 0, 40)
+    trackWrap.Position = UDim2.new(0, 12, 0, posY + 24 - 20)
+    trackWrap.BackgroundTransparency = 1
+    trackWrap.Active = true
+    trackWrap.Parent = mainFrame
+
     local bg = Instance.new("Frame")
-    bg.Size = UDim2.new(1, -20, 0, 10)
-    bg.Position = UDim2.new(0, 10, 0, posY + 18)
-    bg.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+    bg.Size = UDim2.new(1, 0, 0, 8)
+    bg.Position = UDim2.new(0, 0, 0.5, -4)
+    bg.BackgroundColor3 = Theme.Card
     bg.BorderSizePixel = 0
-    bg.Parent = mainFrame
+    bg.Parent = trackWrap
     Instance.new("UICorner", bg).CornerRadius = UDim.new(1, 0)
 
     local fill = Instance.new("Frame")
     local initRatio = (defaultVal - minVal) / (maxVal - minVal)
     fill.Size = UDim2.new(math.clamp(initRatio, 0, 1), 0, 1, 0)
-    fill.BackgroundColor3 = Color3.fromRGB(0, 180, 255)
     fill.BorderSizePixel = 0
     fill.Parent = bg
     Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+    addGradient(fill, ColorSequence.new(Theme.Accent, Theme.Cyan), 0)
+
+    local handle = Instance.new("Frame")
+    handle.Size = UDim2.fromOffset(20, 20)
+    handle.AnchorPoint = Vector2.new(0.5, 0.5)
+    handle.Position = UDim2.new(initRatio, 0, 0.5, 0)
+    handle.BackgroundColor3 = Theme.TextMain
+    handle.BorderSizePixel = 0
+    handle.ZIndex = 5
+    handle.Parent = bg
+    Instance.new("UICorner", handle).CornerRadius = UDim.new(1, 0)
+    local handleStroke = Instance.new("UIStroke", handle)
+    handleStroke.Color = Theme.Accent
+    handleStroke.Thickness = 2.5
 
     local function setVal(newVal, updateTextBox)
         local clamped = math.clamp(newVal, minVal, maxVal)
-        local ratio = (clamped - minVal) / (maxVal - minVal)
-        fill.Size = UDim2.new(math.clamp(ratio, 0, 1), 0, 1, 0)
-        
+        local ratio = math.clamp((clamped - minVal) / (maxVal - minVal), 0, 1)
+        fill.Size = UDim2.new(ratio, 0, 1, 0)
+        handle.Position = UDim2.new(ratio, 0, 0.5, 0)
+
         if updateTextBox then
             if isPercent then
                 textBox.Text = string.format("%d%%", math.floor(clamped * 100))
@@ -325,14 +646,15 @@ local function createInteractiveSlider(titleText, maxHintText, posY, minVal, max
 
     local dragging = false
     local function updateFromInput(input)
-        local rel = math.clamp((input.Position.X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0.0, 1.0)
+        local rel = math.clamp((input.Position.X - trackWrap.AbsolutePosition.X) / trackWrap.AbsoluteSize.X, 0.0, 1.0)
         local calculatedVal = minVal + (rel * (maxVal - minVal))
         setVal(calculatedVal, true)
     end
 
-    track(bg.InputBegan:Connect(function(input)
+    track(trackWrap.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
+            tween(handle, {Size = UDim2.fromOffset(26, 26)}, 0.1)
             updateFromInput(input)
         end
     end))
@@ -346,6 +668,7 @@ local function createInteractiveSlider(titleText, maxHintText, posY, minVal, max
     track(UIS.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
+            tween(handle, {Size = UDim2.fromOffset(20, 20)}, 0.1)
         end
     end))
 
@@ -362,15 +685,15 @@ local function createInteractiveSlider(titleText, maxHintText, posY, minVal, max
 end
 
 -- สไลเดอร์ความเร็ว, ความนุ่มนวล (Smoothness), และ UI Opacity
-createInteractiveSlider("Speed", "(Max 10.0x)", 200, 0.1, 10.0, cameraSpeed, false, function(val) cameraSpeed = val end)
-createInteractiveSlider("Smoothness", "(Ultra)", 242, 0.01, 1.0, cameraSmoothness, true, function(val) cameraSmoothness = val end)
+createInteractiveSlider("Speed", "(Max 10.0x)", 256, 0.1, 10.0, cameraSpeed, false, function(val) cameraSpeed = val end)
+createInteractiveSlider("Smoothness", "(Ultra)", 300, 0.01, 1.0, cameraSmoothness, true, function(val) cameraSmoothness = val end)
 
 ----------------------------------------------------------------
 -- FLOATING & DRAGGABLE ZOOM BUTTONS (+ / -)
 ----------------------------------------------------------------
 local zoomFrame = Instance.new("Frame")
-zoomFrame.Size = UDim2.fromOffset(45, 96)
-zoomFrame.Position = UDim2.new(1, -60, 0.5, -48)
+zoomFrame.Size = UDim2.fromOffset(45, 100)
+zoomFrame.Position = UDim2.new(1, -60, 0.5, -50)
 zoomFrame.BackgroundTransparency = 1
 zoomFrame.Active = true
 zoomFrame.Draggable = true
@@ -379,32 +702,34 @@ zoomFrame.Parent = controlGui
 local zoomInBtn = Instance.new("TextButton")
 zoomInBtn.Size = UDim2.fromOffset(44, 44)
 zoomInBtn.Position = UDim2.new(0, 0, 0, 0)
-zoomInBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+zoomInBtn.BackgroundColor3 = Theme.PanelTop
 zoomInBtn.BackgroundTransparency = 1 - joystickOpacity
 zoomInBtn.Text = "+"
 zoomInBtn.Font = Enum.Font.GothamBold
 zoomInBtn.TextSize = 22
-zoomInBtn.TextColor3 = Color3.fromRGB(0, 180, 255)
+zoomInBtn.TextColor3 = Theme.Cyan
+zoomInBtn.AutoButtonColor = false
 zoomInBtn.Parent = zoomFrame
-Instance.new("UICorner", zoomInBtn).CornerRadius = UDim.new(0, 10)
+Instance.new("UICorner", zoomInBtn).CornerRadius = UDim.new(0, 12)
 local zoomInStroke = Instance.new("UIStroke", zoomInBtn)
-zoomInStroke.Color = Color3.fromRGB(0, 180, 255)
+zoomInStroke.Color = Theme.Cyan
 zoomInStroke.Transparency = 1 - joystickOpacity
 zoomInStroke.Thickness = 1.5
 
 local zoomOutBtn = Instance.new("TextButton")
 zoomOutBtn.Size = UDim2.fromOffset(44, 44)
-zoomOutBtn.Position = UDim2.new(0, 0, 0, 50)
-zoomOutBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+zoomOutBtn.Position = UDim2.new(0, 0, 0, 54)
+zoomOutBtn.BackgroundColor3 = Theme.PanelTop
 zoomOutBtn.BackgroundTransparency = 1 - joystickOpacity
 zoomOutBtn.Text = "-"
 zoomOutBtn.Font = Enum.Font.GothamBold
 zoomOutBtn.TextSize = 26
-zoomOutBtn.TextColor3 = Color3.fromRGB(0, 180, 255)
+zoomOutBtn.TextColor3 = Theme.Cyan
+zoomOutBtn.AutoButtonColor = false
 zoomOutBtn.Parent = zoomFrame
-Instance.new("UICorner", zoomOutBtn).CornerRadius = UDim.new(0, 10)
+Instance.new("UICorner", zoomOutBtn).CornerRadius = UDim.new(0, 12)
 local zoomOutStroke = Instance.new("UIStroke", zoomOutBtn)
-zoomOutStroke.Color = Color3.fromRGB(0, 180, 255)
+zoomOutStroke.Color = Theme.Cyan
 zoomOutStroke.Transparency = 1 - joystickOpacity
 zoomOutStroke.Thickness = 1.5
 
@@ -412,8 +737,8 @@ zoomOutStroke.Thickness = 1.5
 -- FLOATING & DRAGGABLE CAMERA LEAN BUTTONS (L / R)
 ----------------------------------------------------------------
 local leanFrame = Instance.new("Frame")
-leanFrame.Size = UDim2.fromOffset(96, 45)
-leanFrame.Position = UDim2.new(1, -165, 0.5, -48)
+leanFrame.Size = UDim2.fromOffset(100, 45)
+leanFrame.Position = UDim2.new(1, -170, 0.5, -22)
 leanFrame.BackgroundTransparency = 1
 leanFrame.Active = true
 leanFrame.Draggable = true
@@ -422,46 +747,48 @@ leanFrame.Parent = controlGui
 local leanLeftBtn = Instance.new("TextButton")
 leanLeftBtn.Size = UDim2.fromOffset(44, 44)
 leanLeftBtn.Position = UDim2.new(0, 0, 0, 0)
-leanLeftBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+leanLeftBtn.BackgroundColor3 = Theme.PanelTop
 leanLeftBtn.BackgroundTransparency = 1 - joystickOpacity
-leanLeftBtn.Text = "L"
+leanLeftBtn.Text = "↺"
 leanLeftBtn.Font = Enum.Font.GothamBold
 leanLeftBtn.TextSize = 20
-leanLeftBtn.TextColor3 = Color3.fromRGB(255, 170, 0)
+leanLeftBtn.TextColor3 = Theme.Orange
+leanLeftBtn.AutoButtonColor = false
 leanLeftBtn.Parent = leanFrame
-Instance.new("UICorner", leanLeftBtn).CornerRadius = UDim.new(0, 10)
+Instance.new("UICorner", leanLeftBtn).CornerRadius = UDim.new(0, 12)
 local leanLeftStroke = Instance.new("UIStroke", leanLeftBtn)
-leanLeftStroke.Color = Color3.fromRGB(255, 170, 0)
+leanLeftStroke.Color = Theme.Orange
 leanLeftStroke.Transparency = 1 - joystickOpacity
 leanLeftStroke.Thickness = 1.5
 
 local leanRightBtn = Instance.new("TextButton")
 leanRightBtn.Size = UDim2.fromOffset(44, 44)
-leanRightBtn.Position = UDim2.new(0, 50, 0, 0)
-leanRightBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+leanRightBtn.Position = UDim2.new(0, 54, 0, 0)
+leanRightBtn.BackgroundColor3 = Theme.PanelTop
 leanRightBtn.BackgroundTransparency = 1 - joystickOpacity
-leanRightBtn.Text = "R"
+leanRightBtn.Text = "↻"
 leanRightBtn.Font = Enum.Font.GothamBold
 leanRightBtn.TextSize = 20
-leanRightBtn.TextColor3 = Color3.fromRGB(255, 170, 0)
+leanRightBtn.TextColor3 = Theme.Orange
+leanRightBtn.AutoButtonColor = false
 leanRightBtn.Parent = leanFrame
-Instance.new("UICorner", leanRightBtn).CornerRadius = UDim.new(0, 10)
+Instance.new("UICorner", leanRightBtn).CornerRadius = UDim.new(0, 12)
 local leanRightStroke = Instance.new("UIStroke", leanRightBtn)
-leanRightStroke.Color = Color3.fromRGB(255, 170, 0)
+leanRightStroke.Color = Theme.Orange
 leanRightStroke.Transparency = 1 - joystickOpacity
 leanRightStroke.Thickness = 1.5
 
 ----------------------------------------------------------------
--- JOYSTICK DESIGN & TRANSPARENCY
+-- FLOATING JOYSTICK
 ----------------------------------------------------------------
-local sizeOuter = 100
+local sizeOuter = 110
 local sizeInner = 44
 local radius = sizeOuter / 2
 
 local outer = Instance.new("Frame")
 outer.Size = UDim2.fromOffset(sizeOuter, sizeOuter)
 outer.Position = UDim2.new(0, 25, 1, -135)
-outer.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+outer.BackgroundColor3 = Theme.PanelTop
 outer.BackgroundTransparency = 1 - joystickOpacity
 outer.Parent = controlGui
 outer.BorderSizePixel = 0
@@ -469,19 +796,19 @@ outer.ZIndex = 8
 outer.Active = true
 Instance.new("UICorner", outer).CornerRadius = UDim.new(1, 0)
 local outerStroke = Instance.new("UIStroke", outer)
-outerStroke.Color = Color3.fromRGB(0, 180, 255)
+outerStroke.Color = Theme.Accent
 outerStroke.Transparency = 1 - joystickOpacity
 outerStroke.Thickness = 1.5
 
 local inner = Instance.new("Frame")
 inner.Size = UDim2.fromOffset(sizeInner, sizeInner)
 inner.Position = UDim2.new(0.5, -sizeInner/2, 0.5, -sizeInner/2)
-inner.BackgroundColor3 = Color3.fromRGB(0, 180, 255)
-inner.BackgroundTransparency = 1 - joystickOpacity
 inner.BorderSizePixel = 0
 inner.ZIndex = 9
 inner.Parent = outer
 Instance.new("UICorner", inner).CornerRadius = UDim.new(1, 0)
+local innerGradient = addGradient(inner, ColorSequence.new(Theme.Accent, Theme.Cyan), 45)
+inner.BackgroundTransparency = 1 - joystickOpacity
 
 local function applyUIOpacity(val)
     joystickOpacity = val
@@ -505,21 +832,33 @@ local function applyUIOpacity(val)
     end
 end
 
-createInteractiveSlider("UI Opacity", "(Max 100%)", 284, 0.0, 1.0, joystickOpacity, true, function(val)
+-- ปรับขนาดจอย (Joystick Size) แบบเรียลไทม์
+local function setJoystickSize(newOuterSize)
+    sizeOuter = newOuterSize
+    sizeInner = math.floor(newOuterSize * 0.4)
+    radius = sizeOuter / 2
+    outer.Size = UDim2.fromOffset(sizeOuter, sizeOuter)
+    inner.Size = UDim2.fromOffset(sizeInner, sizeInner)
+    inner.Position = UDim2.new(0.5, -sizeInner/2, 0.5, -sizeInner/2)
+end
+
+createInteractiveSlider("Joystick Size", "(Max 180)", 344, 70, 180, sizeOuter, false, function(val)
+    setJoystickSize(math.floor(val))
+end)
+
+createInteractiveSlider("UI Opacity", "(Max 100%)", 388, 0.0, 1.0, joystickOpacity, true, function(val)
     applyUIOpacity(val)
 end)
 
 -- ปุ่ม Unload
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(1, -20, 0, 30)
-closeBtn.Position = UDim2.new(0, 10, 0, 390)
-closeBtn.BackgroundColor3 = Color3.fromRGB(190, 40, 50)
-closeBtn.Text = "Unload Script"
-closeBtn.Font = Enum.Font.GothamMedium
-closeBtn.TextSize = 11
-closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Size = UDim2.new(1, -24, 0, 32)
+closeBtn.Position = UDim2.new(0, 12, 0, 478)
+closeBtn.Text = "✕   Unload Script"
 closeBtn.Parent = mainFrame
-Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+styleButton(closeBtn, Theme.Red)
+closeBtn.Font = Enum.Font.GothamBold
+addHover(closeBtn, Theme.Red, Color3.fromRGB(215, 70, 70))
 
 ----------------------------------------------------------------
 -- JOYSTICK TOUCH LOGIC
@@ -585,28 +924,28 @@ end
 track(clearUiBtn.MouseButton1Click:Connect(function()
     isGameUICleared = not isGameUICleared
     setGameUICleared(isGameUICleared)
-    clearUiBtn.Text = isGameUICleared and "Hide Game UI: ON" or "Hide Game UI: OFF"
-    clearUiBtn.BackgroundColor3 = isGameUICleared and Color3.fromRGB(0, 170, 120) or Color3.fromRGB(230, 70, 0)
+    clearUiBtn.Text = isGameUICleared and "🧹   Hide Game UI: ON" or "🧹   Hide Game UI: OFF"
+    tween(clearUiBtn, {BackgroundColor3 = isGameUICleared and Theme.Green or Color3.fromRGB(214, 92, 46)}, 0.15)
 end))
 
 track(joyToggleBtn.MouseButton1Click:Connect(function()
     showJoystick.Value = not showJoystick.Value
-    joyToggleBtn.Text = showJoystick.Value and "Joystick: Visible" or "Joystick: Hidden"
-    joyToggleBtn.BackgroundColor3 = showJoystick.Value and Color3.fromRGB(0, 120, 215) or Color3.fromRGB(70, 70, 80)
+    joyToggleBtn.Text = showJoystick.Value and "🕹️   Joystick: Visible" or "🕹️   Joystick: Hidden"
+    tween(joyToggleBtn, {BackgroundColor3 = showJoystick.Value and Theme.Cyan or Theme.Off}, 0.15)
     updateElementsVisible()
 end))
 
 track(zoomToggleBtn.MouseButton1Click:Connect(function()
     showZoomButtons.Value = not showZoomButtons.Value
-    zoomToggleBtn.Text = showZoomButtons.Value and "Zoom UI: Visible" or "Zoom UI: Hidden"
-    zoomToggleBtn.BackgroundColor3 = showZoomButtons.Value and Color3.fromRGB(140, 0, 215) or Color3.fromRGB(70, 70, 80)
+    zoomToggleBtn.Text = showZoomButtons.Value and "🔍   Zoom UI: Visible" or "🔍   Zoom UI: Hidden"
+    tween(zoomToggleBtn, {BackgroundColor3 = showZoomButtons.Value and Theme.Purple or Theme.Off}, 0.15)
     updateElementsVisible()
 end))
 
 track(leanToggleBtn.MouseButton1Click:Connect(function()
     showLeanButtons.Value = not showLeanButtons.Value
-    leanToggleBtn.Text = showLeanButtons.Value and "Camera Lean: Visible" or "Camera Lean: Hidden"
-    leanToggleBtn.BackgroundColor3 = showLeanButtons.Value and Color3.fromRGB(215, 120, 0) or Color3.fromRGB(70, 70, 80)
+    leanToggleBtn.Text = showLeanButtons.Value and "📐   Camera Lean: Visible" or "📐   Camera Lean: Hidden"
+    tween(leanToggleBtn, {BackgroundColor3 = showLeanButtons.Value and Theme.Orange or Theme.Off}, 0.15)
     updateElementsVisible()
 end))
 
@@ -756,16 +1095,18 @@ local function applyToggle(state)
 
         camera.CameraType = Enum.CameraType.Scriptable
         camera.CameraSubject = nil
-        toggleBtn.Text = "FreeCam: ON"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 120)
+        toggleBtn.Text = "⏻   FreeCam: ON"
+        tween(toggleBtn, {BackgroundColor3 = Theme.Green}, 0.15)
+        tween(dot, {BackgroundColor3 = Theme.Cyan}, 0.15)
     else
         camera.CameraType = Enum.CameraType.Custom
         local char = player.Character or player.CharacterAdded:Wait()
         camera.CameraSubject = char:FindFirstChildOfClass("Humanoid")
         player.CameraMinZoomDistance = origMinZoom
         player.CameraMaxZoomDistance = origMaxZoom
-        toggleBtn.Text = "FreeCam: OFF"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 80)
+        toggleBtn.Text = "⏻   FreeCam: OFF"
+        tween(toggleBtn, {BackgroundColor3 = Theme.Off}, 0.15)
+        tween(dot, {BackgroundColor3 = Theme.Green}, 0.15)
     end
     updateElementsVisible()
 end
@@ -876,6 +1217,42 @@ track(closeBtn.MouseButton1Click:Connect(function()
     showZoomButtons:Destroy()
     showLeanButtons:Destroy()
 end))
+
+----------------------------------------------------------------
+-- RESPONSIVE SCALING (auto-shrink UI on phones/small screens)
+----------------------------------------------------------------
+local mainScale = Instance.new("UIScale"); mainScale.Parent = mainFrame
+local foldScale = Instance.new("UIScale"); foldScale.Parent = foldBtn
+local helpScale = Instance.new("UIScale"); helpScale.Parent = helpFrame
+local zoomScale = Instance.new("UIScale"); zoomScale.Parent = zoomFrame
+local leanScale = Instance.new("UIScale"); leanScale.Parent = leanFrame
+local joyScale  = Instance.new("UIScale"); joyScale.Parent = outer
+
+local function computeUIScale()
+    local vp = camera.ViewportSize
+    local isTouchDevice = UIS.TouchEnabled and not UIS.MouseEnabled
+    if vp.X <= 400 then
+        return 0.62
+    elseif vp.X <= 600 then
+        return 0.72
+    elseif isTouchDevice or vp.X <= 900 then
+        return 0.82
+    end
+    return 1
+end
+
+local function applyUIScale()
+    local s = computeUIScale()
+    mainScale.Scale = s
+    foldScale.Scale = s
+    helpScale.Scale = s
+    zoomScale.Scale = s
+    leanScale.Scale = s
+    joyScale.Scale = s
+end
+
+applyUIScale()
+track(camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyUIScale))
 
 ----------------------------------------------------------------
 -- SHOW INITIAL NOTIFICATION
